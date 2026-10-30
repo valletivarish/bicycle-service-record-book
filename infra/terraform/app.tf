@@ -2,10 +2,12 @@ data "aws_ssm_parameter" "al2023_ami" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
+# One repository per image: the API and the web (Nginx + Angular) image.
 # Tags are commit SHAs and are never reused, so they can be immutable.
-resource "aws_ecr_repository" "api" {
+resource "aws_ecr_repository" "app" {
   # checkov:skip=CKV_AWS_136:default AES-256 encryption is enough for app images; a KMS key adds a monthly charge
-  name                 = "service-book-api"
+  for_each             = toset(["service-book-api", "service-book-web"])
+  name                 = each.key
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
@@ -13,10 +15,11 @@ resource "aws_ecr_repository" "api" {
   }
 }
 
-# Only the last 10 images are kept: enough for rollback without storing
-# every build forever.
-resource "aws_ecr_lifecycle_policy" "api" {
-  repository = aws_ecr_repository.api.name
+# Only the last 10 images per repository are kept: enough for rollback
+# without storing every build forever.
+resource "aws_ecr_lifecycle_policy" "app" {
+  for_each   = aws_ecr_repository.app
+  repository = each.value.name
   policy = jsonencode({
     rules = [{
       rulePriority = 1
@@ -41,13 +44,13 @@ resource "aws_instance" "api" {
     http_tokens = "required"
   }
 
-  # Installs Docker and Nginx, writes the /api/ proxy config and the health
-  # metric timer. Releases arrive later through SSM Run Command.
+  # Installs Docker, the Compose plugin and the health metric timer.
+  # Releases (two containers) arrive later through SSM Run Command.
   user_data = templatefile("${path.module}/../../scripts/ec2-user-data.sh", {
-    nginx_conf     = file("${path.module}/../nginx/api-proxy.conf")
-    health_script  = file("${path.module}/../../scripts/health-metric.sh")
-    health_service = file("${path.module}/../systemd/service-book-health.service")
-    health_timer   = file("${path.module}/../systemd/service-book-health.timer")
+    compose_version = var.compose_version
+    health_script   = file("${path.module}/../../scripts/health-metric.sh")
+    health_service  = file("${path.module}/../systemd/service-book-health.service")
+    health_timer    = file("${path.module}/../systemd/service-book-health.timer")
   })
 
   root_block_device {
@@ -64,8 +67,8 @@ resource "aws_instance" "api" {
   tags = { Name = "service-book-api" }
 }
 
-# Stable address for the API host, kept for the whole assessment period.
-# CloudFront reaches the host through this address's public DNS name.
+# Stable public address of the app (http://<elastic-ip>/), kept for the
+# whole assessment period and re-associated if the instance is replaced.
 resource "aws_eip" "api" {
   domain = "vpc"
   tags   = { Name = "service-book-api" }

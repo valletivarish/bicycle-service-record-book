@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { ServiceRecord, ServiceRecordInput } from './service-record';
 
 // Relative URL on purpose: in every environment the API is served from the
-// same origin under /api/ (Nginx locally, CloudFront /api/* on AWS).
+// same origin under /api/, proxied by the Nginx web container.
 const API = '/api/records';
 
 @Injectable({ providedIn: 'root' })

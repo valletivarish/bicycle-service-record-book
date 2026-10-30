@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run every minute by service-book-health.timer. Pushes AppHealthy=1 to
-# CloudWatch when /api/health answers through Nginx -> Node -> RDS, else 0.
+# CloudWatch when /api/health answers through the web container, the API and RDS, else 0.
 TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token \
   -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
 REGION=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" \

@@ -1,17 +1,9 @@
 output "app_url" {
-  value = "https://${aws_cloudfront_distribution.app.domain_name}"
+  value = "http://${aws_eip.api.public_ip}"
 }
 
-output "distribution_id" {
-  value = aws_cloudfront_distribution.app.id
-}
-
-output "site_bucket" {
-  value = local.site_bucket
-}
-
-output "ecr_repository_url" {
-  value = aws_ecr_repository.api.repository_url
+output "registry" {
+  value = split("/", aws_ecr_repository.app["service-book-api"].repository_url)[0]
 }
 
 output "instance_id" {

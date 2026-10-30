@@ -1,0 +1,32 @@
+# Production containers on the EC2 host, started by scripts/deploy-release.sh.
+# REGISTRY, API_TAG and WEB_TAG come from the .env file the deploy script
+# writes next to this file; api.env holds the RDS settings (root-only file).
+name: service-book
+
+x-logging: &logging
+  # Container logs are capped so they cannot fill the 20 GB disk.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: ${REGISTRY}/service-book-api:${API_TAG}
+    # Docker starts the containers again after a reboot or a crash.
+    restart: unless-stopped
+    env_file: api.env
+    environment:
+      RELEASE_ID: ${API_TAG}
+    volumes:
+      - ./rds-ca.pem:/certs/rds-ca.pem:ro
+    logging: *logging
+
+  web:
+    image: ${REGISTRY}/service-book-web:${WEB_TAG}
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      - api
+    logging: *logging

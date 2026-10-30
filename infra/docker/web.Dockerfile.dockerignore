@@ -1,0 +1,3 @@
+*
+!infra/nginx/web.conf
+!code/dist/service-book/browser

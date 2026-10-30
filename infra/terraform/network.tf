@@ -1,5 +1,5 @@
 resource "aws_vpc" "main" {
-  # checkov:skip=CKV2_AWS_11:flow logs would add log storage cost; SG rules and CloudFront are the access controls here
+  # checkov:skip=CKV2_AWS_11:flow logs would add log storage cost; security groups are the access control and there is little traffic
   cidr_block           = "10.20.0.0/16"
   enable_dns_hostnames = true
   tags                 = { Name = "service-book" }
@@ -50,20 +50,23 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "web" {
   name        = "service-book-web"
-  description = "HTTP from CloudFront to Nginx on the API host"
+  description = "Public HTTP to the web container on the app host"
   vpc_id      = aws_vpc.main.id
 
-  # Only CloudFront's origin-facing addresses can reach Nginx, so the API
-  # cannot be called directly on the Elastic IP, bypassing HTTPS.
+  # Examiners open the app at http://<elastic-ip>/ without an AWS account, so
+  # port 80 is public. Only the web container listens on it; the API and the
+  # database are not reachable from outside. No SSH: admin goes through SSM.
   ingress {
-    description     = "HTTP from CloudFront origin servers"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
+    # checkov:skip=CKV_AWS_260:port 80 is the public entry point of the app (CloudFront is denied in the lab and there is no domain for a certificate)
+    description = "HTTP from the internet to the web container"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTPS out covers ECR, SSM, S3, CloudWatch and the dnf repositories.
+  # HTTPS out covers ECR, SSM, CloudWatch, the RDS CA bundle and the dnf
+  # repositories; nothing else is needed outbound.
   egress {
     description = "HTTPS to AWS APIs and package repositories"
     from_port   = 443
@@ -79,10 +82,6 @@ resource "aws_security_group" "web" {
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
-}
-
-data "aws_ec2_managed_prefix_list" "cloudfront" {
-  name = "com.amazonaws.global.cloudfront.origin-facing"
 }
 
 resource "aws_security_group" "db" {

@@ -1,9 +1,10 @@
 # One pipeline for the Angular frontend, the Express API and the Terraform.
 # CI (every push, pull request and manual run): tests, lint, static analysis,
-# dependency, secret, IaC and container scans, and the production builds.
-# CD (main only, after every CI job passes): push the scanned API image to
-# ECR, swap the container on EC2 through SSM, publish the Angular build to S3
-# behind CloudFront and smoke test the public URL.
+# dependency, secret, IaC and container scans, and the two container images
+# (API, and Nginx with the Angular build).
+# CD (main only, after every CI job passes): push the scanned images to ECR,
+# start them on the EC2 host with Docker Compose through SSM Run Command
+# (health-gated, automatic rollback) and smoke test the public URL.
 name: CI/CD
 
 on:
@@ -24,8 +25,7 @@ env:
   TERRAFORM_VERSION: "1.15.8"
   AWS_REGION: us-east-1
   # Not a secret: CD stops if the lab credentials belong to any other account.
-  # Placeholder until the Learner Lab account ID has been checked.
-  EXPECTED_AWS_ACCOUNT_ID: "SET-ME-LAB-ACCOUNT-ID"
+  EXPECTED_AWS_ACCOUNT_ID: "057868876852"
   SUMMARY: node scripts/ci/report-summary.mjs
 
 jobs:
@@ -61,7 +61,9 @@ jobs:
               - *shared
               - code/server/**
               - infra/docker/**
-              - scripts/deploy-container.sh
+              - infra/compose.aws.yml
+              - scripts/deploy-release.sh
+              - scripts/rollback.sh
               - scripts/smoke-test.sh
             web:
               - *shared
@@ -69,10 +71,11 @@ jobs:
               - code/public/**
               - code/*.json
               - code/eslint.config.js
+              - infra/docker/web.Dockerfile*
+              - infra/nginx/**
             infra:
               - *shared
               - infra/terraform/**
-              - infra/nginx/**
               - infra/systemd/**
               - scripts/ec2-user-data.sh
               - scripts/health-metric.sh
@@ -81,7 +84,7 @@ jobs:
           echo "| Part | Changed / will run |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| API (tests, image) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.api == 'true' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Angular (lint, build) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Angular (lint, build, web image) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Terraform (validate, Checkov) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.infra == 'true' }} |" >> $GITHUB_STEP_SUMMARY
 
   backend:
@@ -138,11 +141,13 @@ jobs:
             api-tests.xml
 
   frontend:
-    name: "CI: Angular lint and build"
+    name: "CI: Angular build and web image scan"
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      TRIVY_VERSION: "0.75.0"
     defaults:
       run:
         working-directory: code
@@ -161,15 +166,34 @@ jobs:
           cd .. && $SUMMARY eslint eslint-web.json "$(cd code && npx eslint --version)"
       - name: Production build
         run: npx ng build
+      - name: Build the web image (Nginx + Angular build)
+        working-directory: .
+        run: docker build -f infra/docker/web.Dockerfile -t service-book-web:${{ github.sha }} .
+      - name: Container image vulnerabilities (Trivy)
+        working-directory: .
+        run: |
+          bash scripts/ci/install-trivy.sh "$TRIVY_VERSION"
+          trivy image --quiet --scanners vuln --ignore-unfixed --format json -o trivy-web.json \
+            service-book-web:${{ github.sha }} || true
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            service-book-web:${{ github.sha }} || true
+          $SUMMARY trivy trivy-web.json "$TRIVY_VERSION"
+      # CD pushes this exact scanned image, so it is kept as an artifact.
+      - name: Save image
+        working-directory: .
+        run: docker save service-book-web:${{ github.sha }} | gzip > web-image.tar.gz
       - uses: actions/upload-artifact@v7
         with:
-          name: frontend-dist
-          path: code/dist/service-book/browser
+          name: web-image
+          path: web-image.tar.gz
+          retention-days: 3
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: web-reports
-          path: eslint-web.json
+          path: |
+            eslint-web.json
+            trivy-web.json
 
   dependencies:
     name: "CI: dependency audit"
@@ -323,18 +347,9 @@ jobs:
       # image takes to build from scratch (runs 41006736016-41007558720).
       - name: Build the API image
         run: docker build -f infra/docker/api.Dockerfile -t service-book-api:${{ github.sha }} code/server
-      - name: Download Trivy
-        # Official release archive, checked against the published checksums.
-        run: |
-          cd /tmp
-          base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION
-          curl -fsSLO $base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
-          curl -fsSLO $base/trivy_${TRIVY_VERSION}_checksums.txt
-          sha256sum --check --ignore-missing trivy_${TRIVY_VERSION}_checksums.txt
-          tar -xzf trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz trivy
-          install trivy /usr/local/bin/trivy
       - name: Container image vulnerabilities (Trivy)
         run: |
+          bash scripts/ci/install-trivy.sh "$TRIVY_VERSION"
           trivy image --quiet --scanners vuln --ignore-unfixed --format json -o trivy.json \
             service-book-api:${{ github.sha }} || true
           trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
@@ -403,32 +418,50 @@ jobs:
           terraform init -input=false -backend-config="bucket=$EXPECTED_AWS_ACCOUNT_ID-servicebook-tfstate"
           {
             echo "RELEASE_ID=${GITHUB_SHA::12}"
-            echo "ECR_REPO=$(terraform output -raw ecr_repository_url)"
+            echo "REGISTRY=$(terraform output -raw registry)"
             echo "INSTANCE_ID=$(terraform output -raw instance_id)"
-            echo "SITE_BUCKET=$(terraform output -raw site_bucket)"
-            echo "DISTRIBUTION_ID=$(terraform output -raw distribution_id)"
             echo "APP_URL=$(terraform output -raw app_url)"
           } >> $GITHUB_ENV
       - uses: actions/download-artifact@v8
-        if: needs.image.result == 'success'
+        if: needs.image.result == 'success' || needs.frontend.result == 'success'
         with:
-          name: api-image
-      - name: Push the scanned image to ECR
-        if: needs.image.result == 'success'
+          pattern: "*-image"
+          merge-multiple: true
+      # Only the images built in this run are pushed; "-" tells the host to
+      # keep the running tag of a part that did not change.
+      - name: Push the scanned images to ECR
         run: |
-          aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
-          gunzip -c api-image.tar.gz | docker load
-          docker tag service-book-api:$GITHUB_SHA $ECR_REPO:$RELEASE_ID
-          docker push $ECR_REPO:$RELEASE_ID
-      - name: Swap the API container on EC2 (SSM Run Command)
-        if: needs.image.result == 'success'
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          api_tag=-
+          web_tag=-
+          if [ "${{ needs.image.result }}" = success ]; then
+            gunzip -c api-image.tar.gz | docker load
+            docker tag service-book-api:$GITHUB_SHA $REGISTRY/service-book-api:$RELEASE_ID
+            docker push $REGISTRY/service-book-api:$RELEASE_ID
+            api_tag=$RELEASE_ID
+          fi
+          if [ "${{ needs.frontend.result }}" = success ]; then
+            gunzip -c web-image.tar.gz | docker load
+            docker tag service-book-web:$GITHUB_SHA $REGISTRY/service-book-web:$RELEASE_ID
+            docker push $REGISTRY/service-book-web:$RELEASE_ID
+            web_tag=$RELEASE_ID
+          fi
+          echo "API_TAG=$api_tag" >> $GITHUB_ENV
+          echo "WEB_TAG=$web_tag" >> $GITHUB_ENV
+      - name: Start the release on EC2 (SSM Run Command, Docker Compose)
         run: |
-          # The deploy script travels inside the command itself, so the host
-          # always runs the version from this commit.
-          script=$(base64 -w0 scripts/deploy-container.sh)
-          jq -n --arg s "$script" --arg r "$ECR_REPO" --arg t "$RELEASE_ID" \
-            '{commands: ["echo \($s) | base64 -d > /tmp/deploy-container.sh",
-                         "bash /tmp/deploy-container.sh \($r) \($t)"]}' > ssm-params.json
+          # The deploy files travel inside the command itself, so the host
+          # always runs the versions from this commit.
+          b64() { base64 -w0 "$1"; }
+          jq -n --arg d "$(b64 scripts/deploy-release.sh)" --arg r "$(b64 scripts/rollback.sh)" \
+            --arg c "$(b64 infra/compose.aws.yml)" \
+            --arg args "$REGISTRY $API_TAG $WEB_TAG" \
+            '{commands: [
+              "mkdir -p /opt/service-book && cd /opt/service-book",
+              "echo \($d) | base64 -d > deploy-release.sh",
+              "echo \($r) | base64 -d > rollback.sh",
+              "echo \($c) | base64 -d > compose.aws.yml",
+              "bash deploy-release.sh \($args)"]}' > ssm-params.json
           command_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
             --document-name AWS-RunShellScript --comment "Deploy $RELEASE_ID" \
             --timeout-seconds 600 --parameters file://ssm-params.json \
@@ -441,29 +474,13 @@ jobs:
           done
           aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
             --query '[StandardOutputContent, StandardErrorContent]' --output text
-          echo "| Release | Image | SSM status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| $RELEASE_ID | service-book-api:$RELEASE_ID | **$status** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release | API image | Web image | SSM command | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| $RELEASE_ID | $API_TAG | $WEB_TAG | $command_id | **$status** |" >> $GITHUB_STEP_SUMMARY
           [ "$status" = Success ]
-      - uses: actions/download-artifact@v8
-        if: needs.frontend.result == 'success'
-        with:
-          name: frontend-dist
-          path: dist
-      - name: Publish the Angular build to S3 and refresh CloudFront
-        if: needs.frontend.result == 'success'
-        run: |
-          # File names of JS/CSS carry a content hash, so they can be cached
-          # for a year; index.html is always revalidated.
-          aws s3 sync dist "s3://$SITE_BUCKET" --delete --exclude index.html \
-            --cache-control "public,max-age=31536000,immutable"
-          aws s3 cp dist/index.html "s3://$SITE_BUCKET/index.html" --cache-control "no-cache"
-          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
-            --paths /index.html --query Invalidation.Id --output text)
-          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$id"
       # The release check applies only when this run deployed a new API image.
-      - name: Smoke test through CloudFront
+      - name: Smoke test the public URL
         run: |
           expected=""
-          [ "${{ needs.image.result }}" = success ] && expected=$RELEASE_ID
+          [ "$API_TAG" != - ] && expected=$API_TAG
           bash scripts/smoke-test.sh "$APP_URL" "$expected"

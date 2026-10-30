@@ -1,8 +1,9 @@
 #!/bin/bash
-# Manual recovery, run on the EC2 host (SSM Session Manager or Run Command):
-# starts the image recorded as the previous good release again.
+# Manual recovery on the EC2 host (SSM Run Command or Session Manager):
+# starts the release recorded in previous.env again. Running it a second time
+# goes forward again, because the deploy script records the swapped release.
 set -euo pipefail
 STATE=/opt/service-book
-PREVIOUS=$(cat $STATE/previous-tag)
-REPO=$(docker inspect --format '{{.Config.Image}}' service-book-api | cut -d: -f1)
-bash "$(dirname "$0")/deploy-container.sh" "$REPO" "$PREVIOUS"
+tag() { sed -n "s/^$1=//p" "$STATE/$2"; }
+bash "$STATE/deploy-release.sh" "$(tag REGISTRY previous.env)" \
+  "$(tag API_TAG previous.env)" "$(tag WEB_TAG previous.env)"

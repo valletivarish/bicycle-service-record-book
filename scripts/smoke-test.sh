@@ -1,6 +1,6 @@
 #!/bin/bash
-# Post-deploy check through CloudFront: smoke-test.sh <app-url> [expected-release]
-# Covers S3 + CloudFront routing, Nginx, the Node API and RDS. The throwaway
+# Post-deploy check through the public URL: smoke-test.sh <app-url> [expected-release]
+# Covers the Nginx web container, the Node API and RDS. The throwaway
 # record is always deleted, even when a check fails.
 set -euo pipefail
 BASE=${1%/}

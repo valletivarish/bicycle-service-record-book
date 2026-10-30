@@ -7,13 +7,15 @@
 @if (record(); as r) {
   <article class="sheet">
     <p class="meta">
-      Job sheet No. {{ r.id }} · written {{ r.createdAt | date: 'd MMM y, HH:mm' }}
+      <span>Job sheet #{{ r.id }}</span>
+      <span>Written {{ r.createdAt | date: 'd MMM y, HH:mm' }}</span>
     </p>
     <h1 class="sheet-title">{{ r.bicycleLabel }}</h1>
+    <p class="status-tag">Status: {{ r.status }}</p>
 
     <dl class="rows">
       <div class="row"><dt>Bicycle</dt><dd>{{ r.bicycleLabel }}</dd></div>
-      <div class="row"><dt>Service date</dt><dd>{{ r.serviceDate | date: 'd MMMM y' }}</dd></div>
+      <div class="row"><dt>Serviced</dt><dd>{{ r.serviceDate | date: 'd MMMM y' }}</dd></div>
       <div class="row"><dt>Status</dt><dd>{{ r.status }}</dd></div>
       <div class="row"><dt>Recorded cost</dt><dd>{{ r.cost | currency: 'EUR' }}</dd></div>
       <div class="row"><dt>Last updated</dt><dd>{{ r.updatedAt | date: 'd MMM y, HH:mm' }}</dd></div>

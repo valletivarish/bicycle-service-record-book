@@ -27,7 +27,7 @@ export class JobSheet implements OnInit {
       next: (record) => {
         this.record.set(record);
         // The tab and a printed sheet's header show which bicycle it is.
-        this.title.setTitle(`Job sheet No. ${record.id} - ${record.bicycleLabel}`);
+        this.title.setTitle(`Job sheet #${record.id} - ${record.bicycleLabel}`);
       },
       error: (err: HttpErrorResponse) =>
         this.error.set(

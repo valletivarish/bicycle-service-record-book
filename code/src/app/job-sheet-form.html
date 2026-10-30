@@ -6,7 +6,7 @@
   <div class="state error" role="alert"><p>{{ loadError() }}</p></div>
 } @else {
   <form class="sheet sheet-form" [formGroup]="form" (ngSubmit)="save()" novalidate>
-    <p class="meta">{{ id() ? 'Job sheet No. ' + id() : 'New job sheet' }}</p>
+    <p class="meta">{{ id() ? 'Job sheet #' + id() : 'New job sheet' }}</p>
     <h1 class="sheet-title">{{ id() ? 'Edit job sheet' : 'Write a job sheet' }}</h1>
 
     <h2 class="section-heading">Bicycle</h2>

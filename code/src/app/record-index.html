@@ -47,12 +47,16 @@
       <li class="entry">
         <div class="entry-main">
           <p class="meta">
-            No. {{ record.id }} · {{ record.serviceDate | date: 'd MMM y' }} · {{ record.status }}
+            <span>Job sheet #{{ record.id }}</span>
+            <span>Serviced {{ record.serviceDate | date: 'd MMM y' }}</span>
           </p>
           <a class="entry-title" [routerLink]="['/records', record.id]">{{ record.bicycleLabel }}</a>
           <p class="entry-work">{{ firstLine(record.workDescription) }}</p>
         </div>
-        <p class="entry-cost">{{ record.cost | currency: 'EUR' }}</p>
+        <div class="entry-side">
+          <p class="entry-cost">{{ record.cost | currency: 'EUR' }}</p>
+          <p class="status-tag">Status: {{ record.status }}</p>
+        </div>
       </li>
     }
   </ol>

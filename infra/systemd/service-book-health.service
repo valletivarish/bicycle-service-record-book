@@ -1,0 +1,6 @@
+[Unit]
+Description=Send the service book health result to CloudWatch
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/service-book/health-metric.sh

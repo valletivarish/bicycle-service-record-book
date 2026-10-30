@@ -1,0 +1,42 @@
+# Local stack that mirrors production: PostgreSQL 16, the API image and
+# Nginx in front. Build the frontend first (cd code && npm run build).
+# Run from the repository root: docker compose -f infra/docker-compose.yml up --build
+name: service-book
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: servicebook
+      POSTGRES_PASSWORD: servicebook
+      POSTGRES_DB: servicebook
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "servicebook"]
+      interval: 2s
+      retries: 20
+
+  api:
+    build:
+      context: ../code/server
+      dockerfile: ../../infra/docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgres://servicebook:servicebook@db:5432/servicebook
+      RELEASE_ID: local-compose
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: nginx:1.29-alpine
+    ports:
+      - "8090:80"
+    volumes:
+      - ../code/dist/service-book/browser:/usr/share/nginx/html:ro
+      - ./nginx/local.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+volumes:
+  db-data:

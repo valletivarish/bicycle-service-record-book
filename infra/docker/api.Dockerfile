@@ -1,5 +1,5 @@
 # Image for the Express API. Built in CI, pushed to Amazon ECR and run on EC2.
-# Build context is code/server.
+# Build context is server/.
 
 # Stage 1 installs the production dependencies with npm.
 FROM node:22-alpine AS deps

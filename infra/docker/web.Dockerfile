@@ -11,4 +11,4 @@ RUN apk del --no-cache curl && apk upgrade --no-cache
 USER nginx
 
 COPY infra/nginx/web.conf /etc/nginx/conf.d/default.conf
-COPY code/dist/service-book/browser /usr/share/nginx/html
+COPY dist/service-book/browser /usr/share/nginx/html

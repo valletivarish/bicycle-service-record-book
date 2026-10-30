@@ -19,8 +19,8 @@ look them up in a service index, edit them, print them and delete them.
 ## Structure
 
 ```text
-code/                     Angular app (src/, angular.json, package.json)
-code/server/              Express API (src/, migrations/, test/, package.json)
+src/, angular.json       Angular app (with package.json at the top level)
+server/                   Express API (src/, migrations/, test/, package.json)
 infra/docker/             API and web Dockerfiles
 infra/nginx/              Nginx config of the web container
 infra/systemd/            Health metric timer for the EC2 host
@@ -49,18 +49,18 @@ collection, Collected.
 ## Run locally
 
 ```bash
-cd code && npm ci && npm run build && cd ..
+npm ci && npm run build
 docker compose -f infra/docker-compose.yml up --build
 # open http://localhost:8090
 ```
 
-For development, run PostgreSQL, then `cd code/server && npm ci && DATABASE_URL=... npm start`
-and `cd code && npm start` (the Angular dev server proxies `/api` to port 3000).
+For development, run PostgreSQL, then `cd server && npm ci && DATABASE_URL=... npm start`
+and `npm start` (the Angular dev server proxies `/api` to port 3000).
 
 ## Test and lint
 
 ```bash
-cd code/server
+cd server
 DATABASE_URL=postgres://servicebook:servicebook@localhost:5432/servicebook_test npm test
 npm run lint
 cd .. && npm run lint

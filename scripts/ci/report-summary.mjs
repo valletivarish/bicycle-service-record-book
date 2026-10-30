@@ -37,7 +37,7 @@ function cvssToSeverity(score) {
 const parsers = {
   eslint(text) {
     const messages = JSON.parse(text).flatMap((f) =>
-      f.messages.map((m) => `${f.filePath.split('/code/').pop()}:${m.line} ${m.ruleId}`),
+      f.messages.map((m) => `${f.filePath.replace(`${process.cwd()}/`, '')}:${m.line} ${m.ruleId}`),
     );
     const counts = { problems: messages.length };
     return { counts, failed: messages.length > 0, details: messages };

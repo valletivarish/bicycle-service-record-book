@@ -1,5 +1,5 @@
 # Local stack that mirrors production: PostgreSQL 16 (RDS on AWS), the API
-# image and the web image. Build the frontend first (cd code && npm run build).
+# image and the web image. Build the frontend first (npm run build).
 # Run from the repository root: docker compose -f infra/docker-compose.yml up --build
 name: service-book
 
@@ -19,7 +19,7 @@ services:
 
   api:
     build:
-      context: ../code/server
+      context: ../server
       dockerfile: ../../infra/docker/api.Dockerfile
     environment:
       PGHOST: db

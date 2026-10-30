@@ -59,7 +59,7 @@ jobs:
               - scripts/ci/**
             api:
               - *shared
-              - code/server/**
+              - server/**
               - infra/docker/api.Dockerfile
               - infra/compose.aws.yml
               - scripts/deploy-release.sh
@@ -67,10 +67,10 @@ jobs:
               - scripts/smoke-test.sh
             web:
               - *shared
-              - code/src/**
-              - code/public/**
-              - code/*.json
-              - code/eslint.config.js
+              - src/**
+              - public/**
+              - '*.json'
+              - eslint.config.js
               - infra/docker/web.Dockerfile*
               - infra/nginx/**
             infra:
@@ -111,27 +111,27 @@ jobs:
       RELEASE_ID: ci
     defaults:
       run:
-        working-directory: code/server
+        working-directory: server
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: code/server/package-lock.json
+          cache-dependency-path: server/package-lock.json
       - run: npm ci
       - name: Static analysis (ESLint + eslint-plugin-security)
         run: |
-          npx eslint . -f json -o ../../eslint-api.json || true
+          npx eslint . -f json -o ../eslint-api.json || true
           npx eslint . || true
-          cd ../.. && $SUMMARY eslint eslint-api.json "$(cd code/server && npx eslint --version)"
+          cd .. && $SUMMARY eslint eslint-api.json "$(cd server && npx eslint --version)"
       - name: API tests against PostgreSQL 16 (node:test + supertest)
         if: ${{ !cancelled() }}
         run: |
           node --test --test-concurrency=1 \
             --test-reporter=spec --test-reporter-destination=stdout \
-            --test-reporter=junit --test-reporter-destination=../../api-tests.xml || true
-          cd ../.. && $SUMMARY node-test api-tests.xml "node $(node --version)"
+            --test-reporter=junit --test-reporter-destination=../api-tests.xml || true
+          cd .. && $SUMMARY node-test api-tests.xml "node $(node --version)"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
@@ -150,20 +150,20 @@ jobs:
       TRIVY_VERSION: "0.75.0"
     defaults:
       run:
-        working-directory: code
+        working-directory: .
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: code/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - name: Static analysis (angular-eslint)
         run: |
-          npx eslint src -f json -o ../eslint-web.json || true
+          npx eslint src -f json -o eslint-web.json || true
           npx eslint src || true
-          cd .. && $SUMMARY eslint eslint-web.json "$(cd code && npx eslint --version)"
+          $SUMMARY eslint eslint-web.json "$(npx eslint --version)"
       - name: Production build
         run: npx ng build
       - name: Build the web image (Nginx + Angular build)
@@ -208,14 +208,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: npm audit (API lockfile)
         run: |
-          (cd code/server && npm audit --package-lock-only --json > ../../npm-audit-api.json) || true
-          (cd code/server && npm audit --package-lock-only) || true
+          (cd server && npm audit --package-lock-only --json > ../npm-audit-api.json) || true
+          (cd server && npm audit --package-lock-only) || true
           $SUMMARY npm-audit npm-audit-api.json "npm $(npm --version)"
       - name: npm audit (Angular lockfile)
         if: ${{ !cancelled() }}
         run: |
-          (cd code && npm audit --package-lock-only --json > ../npm-audit-web.json) || true
-          (cd code && npm audit --package-lock-only) || true
+          npm audit --package-lock-only --json > npm-audit-web.json || true
+          npm audit --package-lock-only || true
           $SUMMARY npm-audit npm-audit-web.json "npm $(npm --version)"
       - name: Download OSV-Scanner
         if: ${{ !cancelled() }}
@@ -231,8 +231,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           osv-scanner scan source --format json --output-file osv.json \
-            -L code/package-lock.json -L code/server/package-lock.json || true
-          osv-scanner scan source -L code/package-lock.json -L code/server/package-lock.json || true
+            -L package-lock.json -L server/package-lock.json || true
+          osv-scanner scan source -L package-lock.json -L server/package-lock.json || true
           $SUMMARY osv osv.json "$OSV_VERSION"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
@@ -346,7 +346,7 @@ jobs:
       # cache the build took longer (setup + cache export) than this small
       # image takes to build from scratch (runs 41006736016-41007558720).
       - name: Build the API image
-        run: docker build -f infra/docker/api.Dockerfile -t service-book-api:${{ github.sha }} code/server
+        run: docker build -f infra/docker/api.Dockerfile -t service-book-api:${{ github.sha }} server
       - name: Container image vulnerabilities (Trivy)
         run: |
           bash scripts/ci/install-trivy.sh "$TRIVY_VERSION"

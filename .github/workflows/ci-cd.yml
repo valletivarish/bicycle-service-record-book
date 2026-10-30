@@ -432,18 +432,27 @@ jobs:
       - name: Push the scanned images to ECR
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          # Tags are immutable in ECR. A second run of the same commit (for
+          # example after a lab restart) reuses the image that is already there.
+          push() {
+            if aws ecr describe-images --repository-name "$1" --image-ids imageTag=$RELEASE_ID >/dev/null 2>&1; then
+              echo "$1:$RELEASE_ID is already in ECR"
+            else
+              docker push $REGISTRY/$1:$RELEASE_ID
+            fi
+          }
           api_tag=-
           web_tag=-
           if [ "${{ needs.image.result }}" = success ]; then
             gunzip -c api-image.tar.gz | docker load
             docker tag service-book-api:$GITHUB_SHA $REGISTRY/service-book-api:$RELEASE_ID
-            docker push $REGISTRY/service-book-api:$RELEASE_ID
+            push service-book-api
             api_tag=$RELEASE_ID
           fi
           if [ "${{ needs.frontend.result }}" = success ]; then
             gunzip -c web-image.tar.gz | docker load
             docker tag service-book-web:$GITHUB_SHA $REGISTRY/service-book-web:$RELEASE_ID
-            docker push $REGISTRY/service-book-web:$RELEASE_ID
+            push service-book-web
             web_tag=$RELEASE_ID
           fi
           echo "API_TAG=$api_tag" >> $GITHUB_ENV

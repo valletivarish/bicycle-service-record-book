@@ -1,0 +1,387 @@
+# One pipeline for the Angular frontend, the Express API and the Terraform.
+# CI (every push, pull request and manual run): tests, lint, static analysis,
+# dependency, secret, IaC and container scans, and the production builds.
+# CD (main only, after every CI job passes): push the scanned API image to
+# ECR, swap the container on EC2 through SSM, publish the Angular build to S3
+# behind CloudFront and smoke test the public URL.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  TERRAFORM_VERSION: "1.15.8"
+  AWS_REGION: us-east-1
+  # Not a secret: CD stops if the lab credentials belong to any other account.
+  # Placeholder until the Learner Lab account ID has been checked.
+  EXPECTED_AWS_ACCOUNT_ID: "SET-ME-LAB-ACCOUNT-ID"
+  SUMMARY: node scripts/ci/report-summary.mjs
+
+jobs:
+  backend:
+    name: "CI: API lint and tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: servicebook
+          POSTGRES_PASSWORD: servicebook
+          POSTGRES_DB: servicebook_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U servicebook" --health-interval 2s --health-retries 20
+    env:
+      DATABASE_URL: postgres://servicebook:servicebook@localhost:5432/servicebook_test
+      RELEASE_ID: ci
+    defaults:
+      run:
+        working-directory: code/server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: code/server/package-lock.json
+      - run: npm ci
+      - name: Static analysis (ESLint + eslint-plugin-security)
+        run: |
+          npx eslint . -f json -o ../../eslint-api.json || true
+          npx eslint . || true
+          cd ../.. && $SUMMARY eslint eslint-api.json "$(cd code/server && npx eslint --version)"
+      - name: API tests against PostgreSQL 16 (node:test + supertest)
+        if: ${{ !cancelled() }}
+        run: |
+          node --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination=../../api-tests.xml || true
+          cd ../.. && $SUMMARY node-test api-tests.xml "node $(node --version)"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: api-reports
+          path: |
+            eslint-api.json
+            api-tests.xml
+
+  frontend:
+    name: "CI: Angular lint and build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: code
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: code/package-lock.json
+      - run: npm ci
+      - name: Static analysis (angular-eslint)
+        run: |
+          npx eslint src -f json -o ../eslint-web.json || true
+          npx eslint src || true
+          cd .. && $SUMMARY eslint eslint-web.json "$(cd code && npx eslint --version)"
+      - name: Production build
+        run: npx ng build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: code/dist/service-book/browser
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: web-reports
+          path: eslint-web.json
+
+  dependencies:
+    name: "CI: dependency audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OSV_VERSION: "2.6.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm audit (API lockfile)
+        run: |
+          (cd code/server && npm audit --package-lock-only --json > ../../npm-audit-api.json) || true
+          (cd code/server && npm audit --package-lock-only) || true
+          $SUMMARY npm-audit npm-audit-api.json "npm $(npm --version)"
+      - name: npm audit (Angular lockfile)
+        if: ${{ !cancelled() }}
+        run: |
+          (cd code && npm audit --package-lock-only --json > ../npm-audit-web.json) || true
+          (cd code && npm audit --package-lock-only) || true
+          $SUMMARY npm-audit npm-audit-web.json "npm $(npm --version)"
+      - name: Download OSV-Scanner
+        if: ${{ !cancelled() }}
+        # Official release binary, checked against the published SHA-256 list.
+        run: |
+          cd /tmp
+          base=https://github.com/google/osv-scanner/releases/download/v$OSV_VERSION
+          curl -fsSLO $base/osv-scanner_linux_amd64
+          curl -fsSLO $base/osv-scanner_SHA256SUMS
+          sha256sum --check --ignore-missing osv-scanner_SHA256SUMS
+          install osv-scanner_linux_amd64 /usr/local/bin/osv-scanner
+      - name: OSV-Scanner (both lockfiles)
+        if: ${{ !cancelled() }}
+        run: |
+          osv-scanner scan source --format json --output-file osv.json \
+            -L code/package-lock.json -L code/server/package-lock.json || true
+          osv-scanner scan source -L code/package-lock.json -L code/server/package-lock.json || true
+          $SUMMARY osv osv.json "$OSV_VERSION"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: dependency-reports
+          path: |
+            npm-audit-*.json
+            osv.json
+
+  code-scan:
+    name: "CI: code and secret scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SEMGREP_VERSION: "1.180.0"
+      TRUFFLEHOG_VERSION: "3.99.0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # TruffleHog reads every commit, not only the last one
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Semgrep and TruffleHog
+        run: |
+          pip install --quiet semgrep==$SEMGREP_VERSION
+          cd /tmp
+          base=https://github.com/trufflesecurity/trufflehog/releases/download/v$TRUFFLEHOG_VERSION
+          curl -fsSLO $base/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz
+          curl -fsSLO $base/trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt
+          sha256sum --check --ignore-missing trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt
+          tar -xzf trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz trufflehog
+          install trufflehog /usr/local/bin/trufflehog
+      - name: Code security patterns (Semgrep)
+        run: |
+          rules="--config p/javascript --config p/typescript --config p/nodejs \
+            --config p/expressjs --config p/dockerfile --config p/nginx"
+          semgrep scan --metrics=off $rules --json -o semgrep.json code scripts infra || true
+          semgrep scan --metrics=off $rules code scripts infra || true
+          $SUMMARY semgrep semgrep.json "$SEMGREP_VERSION"
+      - name: Committed secrets in git history (TruffleHog)
+        if: ${{ !cancelled() }}
+        run: |
+          trufflehog git file://. --results=verified,unknown --json --no-update > trufflehog.json || true
+          $SUMMARY trufflehog trufflehog.json "$TRUFFLEHOG_VERSION"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: code-scan-reports
+          path: |
+            semgrep.json
+            trufflehog.json
+
+  terraform:
+    name: "CI: Terraform validate and Checkov"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHECKOV_VERSION: "3.3.26"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: terraform fmt and validate
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+          echo "| Tool | Version | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| terraform fmt + validate | $TERRAFORM_VERSION | **PASS** |" >> $GITHUB_STEP_SUMMARY
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: IaC misconfiguration (Checkov)
+        run: |
+          pip install --quiet checkov==$CHECKOV_VERSION
+          checkov -d infra/terraform --framework terraform --quiet --compact \
+            -o cli -o json --output-file-path console,checkov.json || true
+          $SUMMARY checkov checkov.json "$CHECKOV_VERSION"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: checkov-report
+          path: checkov.json
+
+  image:
+    name: "CI: API image build and Trivy scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TRIVY_VERSION: "0.75.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build the API image
+        run: docker build -f infra/docker/api.Dockerfile -t service-book-api:${{ github.sha }} code/server
+      - name: Download Trivy
+        # Official release archive, checked against the published checksums.
+        run: |
+          cd /tmp
+          base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION
+          curl -fsSLO $base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+          curl -fsSLO $base/trivy_${TRIVY_VERSION}_checksums.txt
+          sha256sum --check --ignore-missing trivy_${TRIVY_VERSION}_checksums.txt
+          tar -xzf trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz trivy
+          install trivy /usr/local/bin/trivy
+      - name: Container image vulnerabilities (Trivy)
+        run: |
+          trivy image --quiet --scanners vuln --ignore-unfixed --format json -o trivy.json \
+            service-book-api:${{ github.sha }} || true
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            service-book-api:${{ github.sha }} || true
+          $SUMMARY trivy trivy.json "$TRIVY_VERSION"
+      # CD pushes this exact scanned image, so it is kept as an artifact.
+      - name: Save image
+        run: docker save service-book-api:${{ github.sha }} | gzip > api-image.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: api-image
+          path: api-image.tar.gz
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: trivy-report
+          path: trivy.json
+
+  deploy:
+    name: "CD: deploy to AWS"
+    needs: [backend, frontend, dependencies, code-scan, terraform, image]
+    # Pull requests never deploy. While the lab is stopped the session token
+    # has expired, so this job stops at the account check and changes nothing.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check deployment settings
+        run: |
+          if ! [[ "$EXPECTED_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "EXPECTED_AWS_ACCOUNT_ID is not set to the lab account yet; nothing deployed."
+            exit 1
+          fi
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Check the target AWS account
+        run: |
+          actual=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$actual" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
+            echo "Credentials belong to a different AWS account; stopping before any change."
+            exit 1
+          fi
+          echo "Deploying to the expected AWS account."
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Read infrastructure outputs
+        working-directory: infra/terraform
+        run: |
+          terraform init -input=false -backend-config="bucket=$EXPECTED_AWS_ACCOUNT_ID-servicebook-tfstate"
+          {
+            echo "RELEASE_ID=${GITHUB_SHA::12}"
+            echo "ECR_REPO=$(terraform output -raw ecr_repository_url)"
+            echo "INSTANCE_ID=$(terraform output -raw instance_id)"
+            echo "SITE_BUCKET=$(terraform output -raw site_bucket)"
+            echo "DISTRIBUTION_ID=$(terraform output -raw distribution_id)"
+            echo "APP_URL=$(terraform output -raw app_url)"
+          } >> $GITHUB_ENV
+      - uses: actions/download-artifact@v8
+        with:
+          name: api-image
+      - name: Push the scanned image to ECR
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
+          gunzip -c api-image.tar.gz | docker load
+          docker tag service-book-api:$GITHUB_SHA $ECR_REPO:$RELEASE_ID
+          docker push $ECR_REPO:$RELEASE_ID
+      - name: Swap the API container on EC2 (SSM Run Command)
+        run: |
+          # The deploy script travels inside the command itself, so the host
+          # always runs the version from this commit.
+          script=$(base64 -w0 scripts/deploy-container.sh)
+          jq -n --arg s "$script" --arg r "$ECR_REPO" --arg t "$RELEASE_ID" \
+            '{commands: ["echo \($s) | base64 -d > /tmp/deploy-container.sh",
+                         "bash /tmp/deploy-container.sh \($r) \($t)"]}' > ssm-params.json
+          command_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --comment "Deploy $RELEASE_ID" \
+            --timeout-seconds 600 --parameters file://ssm-params.json \
+            --query Command.CommandId --output text)
+          status=Pending
+          while [[ "$status" =~ ^(Pending|InProgress|Delayed)$ ]]; do
+            sleep 5
+            status=$(aws ssm get-command-invocation --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+          done
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+          echo "| Release | Image | SSM status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| $RELEASE_ID | service-book-api:$RELEASE_ID | **$status** |" >> $GITHUB_STEP_SUMMARY
+          [ "$status" = Success ]
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: dist
+      - name: Publish the Angular build to S3 and refresh CloudFront
+        run: |
+          # File names of JS/CSS carry a content hash, so they can be cached
+          # for a year; index.html is always revalidated.
+          aws s3 sync dist "s3://$SITE_BUCKET" --delete --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp dist/index.html "s3://$SITE_BUCKET/index.html" --cache-control "no-cache"
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
+            --paths /index.html --query Invalidation.Id --output text)
+          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$id"
+      - name: Smoke test through CloudFront
+        run: bash scripts/smoke-test.sh "$APP_URL" "$RELEASE_ID"

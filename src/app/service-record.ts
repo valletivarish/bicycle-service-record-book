@@ -3,7 +3,6 @@ export interface ServiceRecord {
   bicycleLabel: string;
   serviceDate: string;
   workDescription: string;
-  partsFitted: string;
   cost: string;
   status: string;
   createdAt: string;
@@ -12,7 +11,7 @@ export interface ServiceRecord {
 
 export type ServiceRecordInput = Pick<
   ServiceRecord,
-  'bicycleLabel' | 'serviceDate' | 'workDescription' | 'partsFitted' | 'cost' | 'status'
+  'bicycleLabel' | 'serviceDate' | 'workDescription' | 'cost' | 'status'
 >;
 
 // Same list and order as the CHECK constraint in the database migration.

@@ -27,6 +27,9 @@ records.get('/', async (req, res) => {
     params.push(req.query.status);
     where.push(`status = $${params.length}`);
   }
+  if (req.query.q !== undefined && (typeof req.query.q !== 'string' || req.query.q.length > 60)) {
+    return res.status(400).json({ error: 'Search text must be at most 60 characters.' });
+  }
   if (typeof req.query.q === 'string' && req.query.q.trim()) {
     params.push(`%${req.query.q.trim()}%`);
     where.push(`bicycle_label ILIKE $${params.length}`);

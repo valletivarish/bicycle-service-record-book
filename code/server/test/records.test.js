@@ -66,6 +66,8 @@ describe('service record CRUD', () => {
     assert.equal(search.body.length, 1);
 
     await request(app).get('/api/records?status=Lost').expect(400);
+    await request(app).get(`/api/records?q=${'x'.repeat(61)}`).expect(400);
+    await request(app).get('/api/records?q=a&q=b').expect(400);
   });
 
   test('defaults cost to zero and status to Booked in', async () => {

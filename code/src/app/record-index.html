@@ -1,0 +1,60 @@
+<div class="index-head">
+  <div>
+    <h1>Service index</h1>
+    <p class="muted">Every job sheet written at the desk, newest service first.</p>
+  </div>
+  <a routerLink="/records/new" class="button primary">New job sheet</a>
+</div>
+
+<form class="toolbar" role="search" (ngSubmit)="load()">
+  <label>
+    <span>Bicycle label</span>
+    <input type="search" name="search" [(ngModel)]="search" placeholder="e.g. BK-0142" />
+  </label>
+  <label>
+    <span>Status</span>
+    <select name="status" [(ngModel)]="status" (ngModelChange)="load()">
+      <option value="">All statuses</option>
+      @for (s of statuses; track s) {
+        <option [value]="s">{{ s }}</option>
+      }
+    </select>
+  </label>
+  <button type="submit" class="button">Search</button>
+  @if (status || search) {
+    <button type="button" class="link-button" (click)="clearFilters()">Clear</button>
+  }
+</form>
+
+@if (loading()) {
+  <p class="state" role="status">Loading service records…</p>
+} @else if (error()) {
+  <div class="state error" role="alert">
+    <p>{{ error() }}</p>
+    <button type="button" class="button" (click)="load()">Try again</button>
+  </div>
+} @else if (records().length === 0) {
+  <div class="state">
+    @if (status || search) {
+      <p>No job sheets match these filters.</p>
+    } @else {
+      <p>No job sheets yet. Write the first one when a bicycle comes in.</p>
+    }
+  </div>
+} @else {
+  <ol class="history" aria-label="Service history">
+    @for (record of records(); track record.id) {
+      <li class="entry">
+        <div class="entry-main">
+          <p class="meta">
+            No. {{ record.id }} · {{ record.serviceDate | date: 'd MMM y' }} · {{ record.status }}
+          </p>
+          <a class="entry-title" [routerLink]="['/records', record.id]">{{ record.bicycleLabel }}</a>
+          <p class="entry-work">{{ firstLine(record.workDescription) }}</p>
+        </div>
+        <p class="entry-cost">{{ record.cost | currency: 'EUR' }}</p>
+      </li>
+    }
+  </ol>
+  <p class="muted count">{{ records().length }} job sheet(s)</p>
+}

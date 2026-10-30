@@ -1,0 +1,41 @@
+<a routerLink="/" class="back-link">← Back to service index</a>
+
+@if (error()) {
+  <div class="state error" role="alert"><p>{{ error() }}</p></div>
+}
+
+@if (record(); as r) {
+  <article class="sheet">
+    <p class="meta">
+      Job sheet No. {{ r.id }} · written {{ r.createdAt | date: 'd MMM y, HH:mm' }}
+    </p>
+    <h1 class="sheet-title">{{ r.bicycleLabel }}</h1>
+
+    <dl class="rows">
+      <div class="row"><dt>Bicycle</dt><dd>{{ r.bicycleLabel }}</dd></div>
+      <div class="row"><dt>Service date</dt><dd>{{ r.serviceDate | date: 'd MMMM y' }}</dd></div>
+      <div class="row"><dt>Status</dt><dd>{{ r.status }}</dd></div>
+      <div class="row"><dt>Recorded cost</dt><dd>{{ r.cost | currency: 'EUR' }}</dd></div>
+      <div class="row"><dt>Last updated</dt><dd>{{ r.updatedAt | date: 'd MMM y, HH:mm' }}</dd></div>
+    </dl>
+
+    <h2 class="section-heading">Work carried out</h2>
+    <p class="work-text">{{ r.workDescription }}</p>
+  </article>
+
+  <div class="actions">
+    @if (!confirmingDelete()) {
+      <a [routerLink]="['/records', r.id, 'edit']" class="button primary">Edit job sheet</a>
+      <button type="button" class="button" (click)="print()">Print</button>
+      <button type="button" class="button danger" (click)="confirmingDelete.set(true)">Delete</button>
+    } @else {
+      <p class="confirm-text" role="alert">Delete this job sheet? This cannot be undone.</p>
+      <button type="button" class="button danger" [disabled]="deleting()" (click)="confirmDelete()">
+        Yes, delete
+      </button>
+      <button type="button" class="button" (click)="confirmingDelete.set(false)">Cancel</button>
+    }
+  </div>
+} @else if (!error()) {
+  <p class="state" role="status">Loading job sheet…</p>
+}

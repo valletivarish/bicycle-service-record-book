@@ -1,0 +1,72 @@
+<a [routerLink]="id() ? ['/records', id()] : ['/']" class="back-link">
+  ← {{ id() ? 'Back to job sheet' : 'Back to service index' }}
+</a>
+
+@if (loadError()) {
+  <div class="state error" role="alert"><p>{{ loadError() }}</p></div>
+} @else {
+  <form class="sheet sheet-form" [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <p class="meta">{{ id() ? 'Job sheet No. ' + id() : 'New job sheet' }}</p>
+    <h1 class="sheet-title">{{ id() ? 'Edit job sheet' : 'Write a job sheet' }}</h1>
+
+    <h2 class="section-heading">Bicycle</h2>
+    <div class="field">
+      <label for="bicycleLabel">Bicycle label</label>
+      <input id="bicycleLabel" formControlName="bicycleLabel" maxlength="60"
+             placeholder="Tag number and short description, e.g. BK-0142 blue hybrid" />
+      @if (showError('bicycleLabel')) {
+        <p class="field-error">{{ serverErrors()['bicycleLabel'] || 'Enter a bicycle label (up to 60 characters).' }}</p>
+      }
+    </div>
+
+    <h2 class="section-heading">Service</h2>
+    <div class="field-row">
+      <div class="field">
+        <label for="serviceDate">Service date</label>
+        <input id="serviceDate" type="date" formControlName="serviceDate" [max]="today" />
+        @if (showError('serviceDate')) {
+          <p class="field-error">{{ serverErrors()['serviceDate'] || 'Enter a valid date that is not in the future.' }}</p>
+        }
+      </div>
+      <div class="field">
+        <label for="status">Status</label>
+        <select id="status" formControlName="status">
+          @for (s of statuses; track s) {
+            <option [value]="s">{{ s }}</option>
+          }
+        </select>
+        @if (showError('status')) {
+          <p class="field-error">{{ serverErrors()['status'] || 'Choose a status.' }}</p>
+        }
+      </div>
+    </div>
+    <div class="field">
+      <label for="workDescription">Work description</label>
+      <textarea id="workDescription" rows="6" formControlName="workDescription" maxlength="2000"
+                placeholder="What was checked, replaced or adjusted"></textarea>
+      @if (showError('workDescription')) {
+        <p class="field-error">{{ serverErrors()['workDescription'] || 'Describe the work carried out.' }}</p>
+      }
+    </div>
+
+    <h2 class="section-heading">Charges</h2>
+    <div class="field narrow">
+      <label for="cost">Recorded cost (EUR)</label>
+      <input id="cost" inputmode="decimal" formControlName="cost" />
+      @if (showError('cost')) {
+        <p class="field-error">{{ serverErrors()['cost'] || 'Enter an amount of 0 or more, like 45 or 45.50.' }}</p>
+      }
+    </div>
+
+    @if (saveError()) {
+      <p class="state error" role="alert">{{ saveError() }}</p>
+    }
+
+    <div class="actions in-form">
+      <button type="submit" class="button primary" [disabled]="saving()">
+        {{ saving() ? 'Saving…' : 'Save job sheet' }}
+      </button>
+      <a [routerLink]="id() ? ['/records', id()] : ['/']" class="button">Cancel</a>
+    </div>
+  </form>
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.angular/
+coverage/
+.env
+*.tfstate*
+.terraform/
+*.tfplan
+docs/
+video/
+.artifacts/
+.DS_Store
+.vscode/
+.playwright-mcp/
+*.tfvars

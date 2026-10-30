@@ -60,7 +60,7 @@ jobs:
             api:
               - *shared
               - code/server/**
-              - infra/docker/**
+              - infra/docker/api.Dockerfile
               - infra/compose.aws.yml
               - scripts/deploy-release.sh
               - scripts/rollback.sh

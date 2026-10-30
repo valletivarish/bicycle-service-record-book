@@ -49,6 +49,15 @@
       }
     </div>
 
+    <div class="field">
+      <label for="partsFitted">Parts fitted <span class="optional">(optional)</span></label>
+      <input id="partsFitted" formControlName="partsFitted" maxlength="500"
+             placeholder="e.g. Shimano brake pads, 700x28c inner tube" />
+      @if (showError('partsFitted')) {
+        <p class="field-error">{{ serverErrors()['partsFitted'] || 'Keep the parts list to 500 characters.' }}</p>
+      }
+    </div>
+
     <h2 class="section-heading">Charges</h2>
     <div class="field narrow">
       <label for="cost">Recorded cost (EUR)</label>

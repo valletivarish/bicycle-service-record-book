@@ -44,6 +44,7 @@ export class JobSheetForm implements OnInit {
     serviceDate: [this.today, [Validators.required, notInFuture]],
     status: ['Booked in', Validators.required],
     workDescription: ['', [Validators.required, Validators.maxLength(2000)]],
+    partsFitted: ['', Validators.maxLength(500)],
     cost: ['0.00', [Validators.required, Validators.pattern(/^\d{1,6}(\.\d{1,2})?$/)]],
   });
 
@@ -57,6 +58,7 @@ export class JobSheetForm implements OnInit {
           serviceDate: r.serviceDate,
           status: r.status,
           workDescription: r.workDescription,
+          partsFitted: r.partsFitted,
           cost: r.cost,
         }),
       error: () => this.loadError.set('This job sheet could not be loaded for editing.'),

@@ -162,3 +162,24 @@ describe('health and dates', () => {
     assert.ok(errors.serviceDate);
   });
 });
+
+describe('parts fitted', () => {
+  test('stores the parts list and defaults to empty', async () => {
+    const withParts = await request(app)
+      .post('/api/records')
+      .send({ ...valid, partsFitted: 'Shimano brake pads, 700x28c inner tube' })
+      .expect(201);
+    assert.equal(withParts.body.partsFitted, 'Shimano brake pads, 700x28c inner tube');
+
+    const without = await request(app).post('/api/records').send(valid).expect(201);
+    assert.equal(without.body.partsFitted, '');
+  });
+
+  test('rejects a parts list longer than 500 characters', async () => {
+    const res = await request(app)
+      .post('/api/records')
+      .send({ ...valid, partsFitted: 'x'.repeat(501) })
+      .expect(422);
+    assert.ok(res.body.errors.partsFitted);
+  });
+});

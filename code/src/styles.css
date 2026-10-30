@@ -294,6 +294,11 @@ h2 {
   max-width: 220px;
 }
 
+.field label .optional {
+  font-weight: 400;
+  color: var(--grey);
+}
+
 .field-error {
   margin: 0;
   color: var(--accent);

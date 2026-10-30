@@ -273,9 +273,12 @@ jobs:
         run: |
           rules="--config p/javascript --config p/typescript --config p/nodejs \
             --config p/expressjs --config p/dockerfile --config p/nginx"
-          semgrep scan --metrics=off $rules --json -o semgrep.json code scripts infra || true
-          semgrep scan --metrics=off $rules code scripts infra || true
+          semgrep scan --metrics=off $rules --json -o semgrep.json server src scripts infra || true
+          semgrep scan --metrics=off $rules server src scripts infra || true
           $SUMMARY semgrep semgrep.json "$SEMGREP_VERSION"
+          # A missing folder is only a Semgrep error, not a finding, so it would
+          # otherwise pass with nothing scanned.
+          jq -e '.errors | length == 0' semgrep.json > /dev/null || { jq '.errors' semgrep.json; exit 1; }
       - name: Committed secrets in git history (TruffleHog)
         if: ${{ !cancelled() }}
         run: |

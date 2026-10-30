@@ -1,3 +1,10 @@
+# Alarm notifications. The e-mail subscription is added once with the CLI
+# (aws sns subscribe), so no personal address is kept in this repository.
+resource "aws_sns_topic" "alerts" {
+  # checkov:skip=CKV_AWS_26:alarm messages carry no secrets; the default key avoids a KMS key charge
+  name = "service-book-alerts"
+}
+
 # CPU of the API host: the resource utilisation metric for the report.
 resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   alarm_name          = "service-book-cpu-high"
@@ -10,6 +17,8 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   threshold           = 70
   comparison_operator = "GreaterThanThreshold"
   alarm_description   = "API host CPU above 70% for 10 minutes"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
 }
 
 # AppHealthy is pushed every minute by the health timer on the host
@@ -25,6 +34,8 @@ resource "aws_cloudwatch_metric_alarm" "app_unhealthy" {
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"
   alarm_description   = "Health check failed for 3 minutes in a row"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
 }
 
 resource "aws_cloudwatch_dashboard" "main" {

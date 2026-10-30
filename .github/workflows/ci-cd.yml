@@ -12,6 +12,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      api_tag:
+        description: "Deploy this API image tag already in ECR instead of the commit's image (empty = normal run)"
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -430,9 +435,24 @@ jobs:
         with:
           pattern: "*-image"
           merge-multiple: true
+      # A manual run can redeploy an API tag that is already in ECR, for
+      # example to roll forward or to rehearse a failed release through CD.
+      - name: Use an existing API image from ECR
+        if: inputs.api_tag != ''
+        env:
+          INPUT_TAG: ${{ inputs.api_tag }}
+        run: |
+          if ! [[ "$INPUT_TAG" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+            echo "api_tag may only contain letters, digits, dot, dash and underscore"
+            exit 1
+          fi
+          aws ecr describe-images --repository-name service-book-api --image-ids imageTag="$INPUT_TAG" >/dev/null
+          echo "API_TAG=$INPUT_TAG" >> $GITHUB_ENV
+          echo "WEB_TAG=-" >> $GITHUB_ENV
       # Only the images built in this run are pushed; "-" tells the host to
       # keep the running tag of a part that did not change.
       - name: Push the scanned images to ECR
+        if: inputs.api_tag == ''
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
           # Tags are immutable in ECR. A second run of the same commit (for

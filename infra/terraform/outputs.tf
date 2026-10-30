@@ -13,3 +13,7 @@ output "instance_id" {
 output "api_host_ip" {
   value = aws_eip.api.public_ip
 }
+
+output "alerts_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}

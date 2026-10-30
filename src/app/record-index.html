@@ -63,5 +63,7 @@
       </li>
     }
   </ol>
-  <p class="muted count">{{ records().length }} job sheet(s)</p>
+  <p class="muted count">
+    {{ records().length }} job sheet(s) · Recorded total {{ totalCost() | currency: 'EUR' }}
+  </p>
 }

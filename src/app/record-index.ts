@@ -1,5 +1,5 @@
 import { CurrencyPipe, DatePipe } from '@angular/common';
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { RecordsService } from './records.service';
@@ -19,6 +19,10 @@ export class RecordIndex implements OnInit {
   records = signal<ServiceRecord[]>([]);
   loading = signal(true);
   error = signal('');
+  // Summed in cents: costs arrive as decimal strings from PostgreSQL.
+  totalCost = computed(
+    () => this.records().reduce((sum, r) => sum + Math.round(Number(r.cost) * 100), 0) / 100,
+  );
 
   ngOnInit() {
     this.load();

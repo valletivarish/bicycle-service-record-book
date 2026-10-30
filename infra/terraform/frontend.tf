@@ -69,7 +69,19 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
+# Adds HSTS, X-Content-Type-Options, X-Frame-Options and Referrer-Policy.
+data "aws_cloudfront_response_headers_policy" "security" {
+  name = "Managed-SecurityHeadersPolicy"
+}
+
 resource "aws_cloudfront_distribution" "app" {
+  # checkov:skip=CKV_AWS_68:AWS WAF costs a monthly fee per web ACL; the API validates all input itself
+  # checkov:skip=CKV2_AWS_47:no WAF web ACL (see CKV_AWS_68)
+  # checkov:skip=CKV_AWS_86:access logs need a separate log bucket with ACLs for very little traffic
+  # checkov:skip=CKV_AWS_174:the default *.cloudfront.net certificate cannot set a minimum TLS version without a custom domain
+  # checkov:skip=CKV2_AWS_42:no custom domain is owned for the assessment, so the default certificate is used
+  # checkov:skip=CKV_AWS_374:examiners may open the app from any country
+  # checkov:skip=CKV_AWS_310:there is one API origin in one region; failover would need a second stack
   enabled             = true
   comment             = "Service record book"
   default_root_object = "index.html"
@@ -98,12 +110,13 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "site"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = data.aws_cloudfront_cache_policy.optimized.id
-    compress               = true
+    target_origin_id           = "site"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+    compress                   = true
 
     function_association {
       event_type   = "viewer-request"
@@ -113,13 +126,14 @@ resource "aws_cloudfront_distribution" "app" {
 
   # CRUD responses are never cached; every method and query string is passed on.
   ordered_cache_behavior {
-    path_pattern             = "/api/*"
-    target_origin_id         = "api"
-    viewer_protocol_policy   = "redirect-to-https"
-    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-    cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    path_pattern               = "/api/*"
+    target_origin_id           = "api"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
   }
 
   restrictions {

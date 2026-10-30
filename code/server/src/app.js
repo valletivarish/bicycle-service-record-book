@@ -7,7 +7,8 @@ export const app = express();
 // No need to tell every client which framework answers the API.
 app.disable('x-powered-by');
 
-app.use(express.json());
+// A job sheet is at most a few KB; larger bodies are refused early.
+app.use(express.json({ limit: '20kb' }));
 
 // Used by the CD smoke test and the CloudWatch health metric. It queries the
 // database so "ok" means the whole path Nginx -> Node -> PostgreSQL works,
@@ -32,6 +33,9 @@ app.use('/api', (req, res) => {
 app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Request body is not valid JSON.' });
+  }
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body is too large.' });
   }
   console.error(err);
   res.status(500).json({ error: 'Something went wrong on the server.' });

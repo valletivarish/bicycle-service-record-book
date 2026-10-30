@@ -131,6 +131,13 @@ describe('validation and errors', () => {
     await request(app).get('/api/records/abc').expect(400);
   });
 
+  test('returns 413 for a body larger than 20 KB', async () => {
+    await request(app)
+      .post('/api/records')
+      .send({ ...valid, workDescription: 'x'.repeat(30000) })
+      .expect(413);
+  });
+
   test('returns 400 for a body that is not JSON', async () => {
     await request(app)
       .post('/api/records')

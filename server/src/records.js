@@ -5,7 +5,7 @@ import { STATUSES, validateRecord } from './validation.js';
 export const records = Router();
 
 const COLUMNS = `id, bicycle_label AS "bicycleLabel", service_date AS "serviceDate",
-  work_description AS "workDescription", cost, status,
+  work_description AS "workDescription", parts_fitted AS "partsFitted", cost, status,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 function parseId(req, res) {
@@ -55,9 +55,11 @@ records.post('/', async (req, res) => {
   const { values, errors } = validateRecord(req.body);
   if (Object.keys(errors).length) return res.status(422).json({ errors });
   const result = await pool.query(
-    `INSERT INTO service_records (bicycle_label, service_date, work_description, cost, status)
-     VALUES ($1, $2, $3, $4, $5) RETURNING ${COLUMNS}`,
-    [values.bicycleLabel, values.serviceDate, values.workDescription, values.cost, values.status],
+    `INSERT INTO service_records
+       (bicycle_label, service_date, work_description, parts_fitted, cost, status)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
+    [values.bicycleLabel, values.serviceDate, values.workDescription, values.partsFitted,
+      values.cost, values.status],
   );
   res.status(201).json(result.rows[0]);
 });
@@ -69,11 +71,11 @@ records.put('/:id', async (req, res) => {
   if (Object.keys(errors).length) return res.status(422).json({ errors });
   const result = await pool.query(
     `UPDATE service_records
-     SET bicycle_label = $1, service_date = $2, work_description = $3, cost = $4,
-         status = $5, updated_at = now()
-     WHERE id = $6 RETURNING ${COLUMNS}`,
-    [values.bicycleLabel, values.serviceDate, values.workDescription, values.cost,
-      values.status, id],
+     SET bicycle_label = $1, service_date = $2, work_description = $3, parts_fitted = $4,
+         cost = $5, status = $6, updated_at = now()
+     WHERE id = $7 RETURNING ${COLUMNS}`,
+    [values.bicycleLabel, values.serviceDate, values.workDescription, values.partsFitted,
+      values.cost, values.status, id],
   );
   if (result.rowCount === 0) return res.status(404).json({ error: 'Service record not found.' });
   res.json(result.rows[0]);

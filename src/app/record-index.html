@@ -52,6 +52,9 @@
           </p>
           <a class="entry-title" [routerLink]="['/records', record.id]">{{ record.bicycleLabel }}</a>
           <p class="entry-work">{{ firstLine(record.workDescription) }}</p>
+          @if (record.partsFitted) {
+            <p class="entry-parts">Parts fitted: {{ record.partsFitted }}</p>
+          }
         </div>
         <div class="entry-side">
           <p class="entry-cost">{{ record.cost | currency: 'EUR' }}</p>

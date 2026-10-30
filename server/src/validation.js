@@ -40,6 +40,9 @@ export function validateRecord(body, today = todayInDublin()) {
   if (!isRealDate(serviceDate)) errors.serviceDate = 'Service date must be a valid date.';
   else if (serviceDate > today) errors.serviceDate = 'Service date cannot be in the future.';
 
+  const partsFitted = typeof input.partsFitted === 'string' ? input.partsFitted.trim() : '';
+  if (partsFitted.length > 500) errors.partsFitted = 'Parts fitted must be 500 characters or fewer.';
+
   let cost = input.cost === undefined || input.cost === null || input.cost === '' ? '0' : input.cost;
   cost = String(cost).trim();
   if (cost.startsWith('-')) errors.cost = 'Cost cannot be negative.';
@@ -53,7 +56,7 @@ export function validateRecord(body, today = todayInDublin()) {
   if (!STATUSES.includes(status)) errors.status = `Status must be one of: ${STATUSES.join(', ')}.`;
 
   return {
-    values: { bicycleLabel, serviceDate, workDescription, cost, status },
+    values: { bicycleLabel, serviceDate, workDescription, partsFitted, cost, status },
     errors,
   };
 }

@@ -294,6 +294,12 @@ h2 {
   max-width: 220px;
 }
 
+.entry-parts {
+  margin: 4px 0 0;
+  color: var(--grey);
+  font-size: 0.9rem;
+}
+
 .field label .optional {
   font-weight: 400;
   color: var(--grey);

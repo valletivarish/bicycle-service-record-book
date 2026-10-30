@@ -12,7 +12,7 @@ const GATES = {
   'npm-audit': 'HIGH or CRITICAL advisory',
   osv: 'HIGH or CRITICAL advisory',
   semgrep: 'any ERROR or WARNING rule match',
-  trufflehog: 'any secret found',
+  trufflehog: 'any secret not in the accepted list',
   checkov: 'any failed check',
   trivy: 'HIGH or CRITICAL with a fix available',
 };
@@ -80,12 +80,23 @@ const parsers = {
     return { counts, failed: counts.ERROR + counts.WARNING > 0, details };
   },
   trufflehog(text) {
-    const found = text.split('\n').filter((line) => line.trim().startsWith('{'));
-    const details = found.map((line) => {
-      const r = JSON.parse(line);
-      return `${r.DetectorName} verified=${r.Verified} ${JSON.stringify(r.SourceMetadata?.Data?.Git?.file || '')}`;
-    });
-    return { counts: { secrets: found.length }, failed: found.length > 0, details };
+    // Matches listed in trufflehog-accepted.txt (commit + file, with a reason)
+    // are reported but do not fail the gate; anything new does.
+    const accepted = readFileSync(new URL('trufflehog-accepted.txt', import.meta.url), 'utf8')
+      .split('\n')
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => line.split(' ').slice(0, 2).join(' '));
+    const found = text
+      .split('\n')
+      .filter((line) => line.trim().startsWith('{'))
+      .map((line) => JSON.parse(line));
+    const key = (r) => `${r.SourceMetadata?.Data?.Git?.commit} ${r.SourceMetadata?.Data?.Git?.file}`;
+    const fresh = found.filter((r) => !accepted.includes(key(r)));
+    const details = found.map(
+      (r) => `${r.DetectorName} verified=${r.Verified} ${key(r)}${fresh.includes(r) ? '' : ' (accepted)'}`,
+    );
+    const counts = { new: fresh.length, accepted: found.length - fresh.length };
+    return { counts, failed: fresh.length > 0, details };
   },
   checkov(text) {
     // One framework gives an object, several give an array.

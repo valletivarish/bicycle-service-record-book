@@ -44,7 +44,10 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U servicebook" --health-interval 2s --health-retries 20
     env:
-      DATABASE_URL: postgres://servicebook:servicebook@localhost:5432/servicebook_test
+      PGHOST: localhost
+      PGUSER: servicebook
+      PGPASSWORD: servicebook
+      PGDATABASE: servicebook_test
       RELEASE_ID: ci
     defaults:
       run:

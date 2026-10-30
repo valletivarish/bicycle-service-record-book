@@ -22,7 +22,10 @@ services:
       context: ../code/server
       dockerfile: ../../infra/docker/api.Dockerfile
     environment:
-      DATABASE_URL: postgres://servicebook:servicebook@db:5432/servicebook
+      PGHOST: db
+      PGUSER: servicebook
+      PGPASSWORD: servicebook
+      PGDATABASE: servicebook
       RELEASE_ID: local-compose
     depends_on:
       db:

@@ -14,9 +14,18 @@ DB_HOST=$(aws ssm get-parameter --region $REGION --name /service-book/db/host \
   --query Parameter.Value --output text)
 DB_PASSWORD=$(aws ssm get-parameter --region $REGION --name /service-book/db/password \
   --with-decryption --query Parameter.Value --output text)
-# verify-full checks the RDS certificate against the AWS CA bundle.
+# The API verifies the RDS certificate against this AWS CA bundle (DB_SSL).
 curl -fsS -o $STATE/rds-ca.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-DATABASE_URL="postgres://servicebook:$DB_PASSWORD@$DB_HOST:5432/servicebook?sslmode=verify-full&sslrootcert=/certs/rds-ca.pem"
+# Settings go into a root-only env file, so the password is not on any
+# command line (docker run arguments are visible in the process list).
+install -m 600 /dev/null $STATE/api.env
+cat > $STATE/api.env <<ENV
+PGHOST=$DB_HOST
+PGUSER=servicebook
+PGPASSWORD=$DB_PASSWORD
+PGDATABASE=servicebook
+DB_SSL=true
+ENV
 
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin "${REPO%%/*}"
 
@@ -25,7 +34,7 @@ start() {
   docker run -d --name $NAME --restart unless-stopped \
     -p 127.0.0.1:3000:3000 \
     -v $STATE/rds-ca.pem:/certs/rds-ca.pem:ro \
-    -e DATABASE_URL="$DATABASE_URL" -e RELEASE_ID="$1" \
+    --env-file $STATE/api.env -e RELEASE_ID="$1" \
     "$REPO:$1"
 }
 

@@ -1,0 +1,5 @@
+# Accepted TruffleHog matches from git history: <commit> <file> <reason>
+# Both are unverified Postgres URIs, not real secrets. The connection URLs were
+# replaced by PG* variables, but the old commits stay in history.
+fc036ef4b05159b98183831e9040de23ce21a7ce infra/docker-compose.yml local-only compose database password (servicebook), never used on AWS
+fc036ef4b05159b98183831e9040de23ce21a7ce scripts/deploy-container.sh template with shell variables ($DB_PASSWORD), no literal secret

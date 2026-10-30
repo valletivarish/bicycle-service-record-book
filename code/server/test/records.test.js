@@ -143,6 +143,7 @@ describe('health and dates', () => {
     const res = await request(app).get('/api/health').expect(200);
     assert.equal(res.body.status, 'ok');
     assert.equal(res.body.release, process.env.RELEASE_ID || 'local');
+    assert.equal(res.headers['x-powered-by'], undefined);
   });
 
   test('today is taken from the Dublin calendar, not UTC', () => {

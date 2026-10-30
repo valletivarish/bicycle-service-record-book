@@ -4,6 +4,9 @@ import { records } from './records.js';
 
 export const app = express();
 
+// No need to tell every client which framework answers the API.
+app.disable('x-powered-by');
+
 app.use(express.json());
 
 // Used by the CD smoke test and the CloudWatch health metric. It queries the

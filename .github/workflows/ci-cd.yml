@@ -29,8 +29,65 @@ env:
   SUMMARY: node scripts/ci/report-summary.mjs
 
 jobs:
+  # Optimisation: change-based job selection. A push that only touches the
+  # API does not rebuild Angular or re-check Terraform, and the reverse.
+  # Dependency, code and secret scans always run. Manual runs and pull
+  # requests from other events build everything (a manual run after a lab
+  # restart must be able to deploy both parts).
+  changes:
+    name: "CI: detect changed parts"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists pull request files through the API
+    timeout-minutes: 5
+    outputs:
+      api: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.api == 'true' }}
+      web: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }}
+      infra: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.infra == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name != 'workflow_dispatch'
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          # The workflow and the CI scripts count as a change to every part.
+          filters: |
+            shared: &shared
+              - .github/workflows/**
+              - scripts/ci/**
+            api:
+              - *shared
+              - code/server/**
+              - infra/docker/**
+              - scripts/deploy-container.sh
+              - scripts/smoke-test.sh
+            web:
+              - *shared
+              - code/src/**
+              - code/public/**
+              - code/*.json
+              - code/eslint.config.js
+            infra:
+              - *shared
+              - infra/terraform/**
+              - infra/nginx/**
+              - infra/systemd/**
+              - scripts/ec2-user-data.sh
+              - scripts/health-metric.sh
+      - name: Record the selection
+        run: |
+          echo "| Part | Changed / will run |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| API (tests, image) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.api == 'true' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Angular (lint, build) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Terraform (validate, Checkov) | ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.infra == 'true' }} |" >> $GITHUB_STEP_SUMMARY
+
   backend:
     name: "CI: API lint and tests"
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -82,6 +139,8 @@ jobs:
 
   frontend:
     name: "CI: Angular lint and build"
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -208,6 +267,8 @@ jobs:
 
   terraform:
     name: "CI: Terraform validate and Checkov"
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -246,6 +307,8 @@ jobs:
 
   image:
     name: "CI: API image build and Trivy scan"
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -255,8 +318,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+      # Optimisation: Docker layer cache in the GitHub Actions cache. The
+      # npm ci layer is rebuilt only when package-lock.json changes.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the API image
-        run: docker build -f infra/docker/api.Dockerfile -t service-book-api:${{ github.sha }} code/server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: code/server
+          file: infra/docker/api.Dockerfile
+          tags: service-book-api:${{ github.sha }}
+          load: true
+          cache-from: type=gha,scope=api-image
+          cache-to: type=gha,mode=max,scope=api-image
       - name: Download Trivy
         # Official release archive, checked against the published checksums.
         run: |
@@ -290,10 +363,14 @@ jobs:
 
   deploy:
     name: "CD: deploy to AWS"
-    needs: [backend, frontend, dependencies, code-scan, terraform, image]
+    needs: [changes, backend, frontend, dependencies, code-scan, terraform, image]
     # Pull requests never deploy. While the lab is stopped the session token
     # has expired, so this job stops at the account check and changes nothing.
+    # A CI job skipped by the change filter counts as passed; any failed or
+    # cancelled CI job blocks the deployment.
     if: >-
+      !cancelled() &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -340,15 +417,18 @@ jobs:
             echo "APP_URL=$(terraform output -raw app_url)"
           } >> $GITHUB_ENV
       - uses: actions/download-artifact@v8
+        if: needs.image.result == 'success'
         with:
           name: api-image
       - name: Push the scanned image to ECR
+        if: needs.image.result == 'success'
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
           gunzip -c api-image.tar.gz | docker load
           docker tag service-book-api:$GITHUB_SHA $ECR_REPO:$RELEASE_ID
           docker push $ECR_REPO:$RELEASE_ID
       - name: Swap the API container on EC2 (SSM Run Command)
+        if: needs.image.result == 'success'
         run: |
           # The deploy script travels inside the command itself, so the host
           # always runs the version from this commit.
@@ -373,10 +453,12 @@ jobs:
           echo "| $RELEASE_ID | service-book-api:$RELEASE_ID | **$status** |" >> $GITHUB_STEP_SUMMARY
           [ "$status" = Success ]
       - uses: actions/download-artifact@v8
+        if: needs.frontend.result == 'success'
         with:
           name: frontend-dist
           path: dist
       - name: Publish the Angular build to S3 and refresh CloudFront
+        if: needs.frontend.result == 'success'
         run: |
           # File names of JS/CSS carry a content hash, so they can be cached
           # for a year; index.html is always revalidated.
@@ -386,5 +468,9 @@ jobs:
           id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
             --paths /index.html --query Invalidation.Id --output text)
           aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$id"
+      # The release check applies only when this run deployed a new API image.
       - name: Smoke test through CloudFront
-        run: bash scripts/smoke-test.sh "$APP_URL" "$RELEASE_ID"
+        run: |
+          expected=""
+          [ "${{ needs.image.result }}" = success ] && expected=$RELEASE_ID
+          bash scripts/smoke-test.sh "$APP_URL" "$expected"

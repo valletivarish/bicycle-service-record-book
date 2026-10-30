@@ -1,15 +1,16 @@
 #!/bin/bash
-# Post-deploy check through CloudFront: smoke-test.sh <app-url> <expected-release>
+# Post-deploy check through CloudFront: smoke-test.sh <app-url> [expected-release]
 # Covers S3 + CloudFront routing, Nginx, the Node API and RDS. The throwaway
 # record is always deleted, even when a check fails.
 set -euo pipefail
 BASE=${1%/}
-RELEASE=$2
+RELEASE=${2:-}
 fail() { echo "FAIL: $1"; exit 1; }
 
-curl -fsS "$BASE/api/health" | jq -e --arg r "$RELEASE" '.status == "ok" and .release == $r' >/dev/null \
+# An empty release means this run did not deploy the API, so any release is fine.
+curl -fsS "$BASE/api/health" | jq -e --arg r "$RELEASE" '.status == "ok" and ($r == "" or .release == $r)' >/dev/null \
   || fail "health does not report release $RELEASE"
-echo "ok   health reports release $RELEASE"
+echo "ok   health is ok (release ${RELEASE:-unchanged})"
 
 for path in / /records/1 /records/new; do
   curl -fsS "$BASE$path" | grep -q '<app-root>' || fail "$path is not the Angular app"

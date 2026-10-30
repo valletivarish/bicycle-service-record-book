@@ -14,9 +14,13 @@ export async function migrate() {
   const done = await pool.query('SELECT name FROM schema_migrations');
   const applied = new Set(done.rows.map((row) => row.name));
 
+  // Path is fixed by this module (../migrations), never from user input.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
   for (const file of files) {
     if (applied.has(file)) continue;
+    // file is a name returned by readdir of that same fixed folder.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     const sql = await readFile(migrationsDir + file, 'utf8');
     const client = await pool.connect();
     try {

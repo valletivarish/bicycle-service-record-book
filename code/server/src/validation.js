@@ -43,7 +43,9 @@ export function validateRecord(body, today = todayInDublin()) {
   let cost = input.cost === undefined || input.cost === null || input.cost === '' ? '0' : input.cost;
   cost = String(cost).trim();
   if (cost.startsWith('-')) errors.cost = 'Cost cannot be negative.';
-  else if (!/^\d{1,6}(\.\d{1,2})?$/.test(cost)) {
+  // Two plain patterns instead of an optional group, so the check has no
+  // nested quantifier (flagged by eslint-plugin-security as unsafe regex).
+  else if (!/^\d{1,6}$/.test(cost) && !/^\d{1,6}\.\d{1,2}$/.test(cost)) {
     errors.cost = 'Cost must be an amount like 45 or 45.50 (up to 999999.99).';
   }
 

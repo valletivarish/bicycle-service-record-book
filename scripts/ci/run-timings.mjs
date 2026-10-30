@@ -7,8 +7,12 @@
 import { execFileSync } from 'node:child_process';
 
 const [label, ...ids] = process.argv.slice(2);
-const repo = process.env.REPO || 'valletivarish/bicycle-service-record-book';
 const api = (path) => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' }));
+const repo =
+  process.env.GITHUB_REPOSITORY ||
+  execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+    encoding: 'utf8',
+  }).trim();
 const seconds = (a, b) => (new Date(b) - new Date(a)) / 1000;
 
 const rows = ids.map((id) => {

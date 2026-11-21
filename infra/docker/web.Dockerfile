@@ -1,8 +1,7 @@
 # Web image: Nginx with the Angular production build. Built in CI after
 # "ng build"; the build context is the repository root (see the
 # web.Dockerfile.dockerignore next to this file).
-# nginx-unprivileged runs as a non-root user and listens on 8080. The 1.31 line
-# carries the Nginx fixes that Trivy requires; 1.30 does not have them yet.
+# nginx-unprivileged runs as a non-root user and listens on 8080.
 FROM nginxinc/nginx-unprivileged:1.31-alpine
 
 # curl is not used by Nginx and carried the image's HIGH/CRITICAL CVEs (with
